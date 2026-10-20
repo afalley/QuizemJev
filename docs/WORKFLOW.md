@@ -7,9 +7,9 @@ This document provides a comprehensive analysis of the system architecture, appl
 ## 1. High-Level Architecture Overview
 
 The system is organized into modular subsystems:
-- **Web Application & Persistence Layer (`app.py`)**: Flask-based web application managing routing, session authentication, role-based access control, relational persistence (via Flask-SQLAlchemy / PostgreSQL / SQLite), and template rendering.
-- **Grading Coordinator (`grader.py`)**: Centralized grading engine aggregating scores across multiple choice and free-text essay questions.
-- **AI & Heuristic Essay Evaluation Subsystem (`essaygrader.py`)**: Multi-tiered essay evaluation engine supporting local LLM inference (Ollama with semantic embeddings), OpenAI API integration, and deterministic heuristic fallback grading.
+- **Web Application & Persistence Layer (`app.py`)**: Flask-based web application managing routing, session authentication, role-based access control, relational persistence (via Flask-SQLAlchemy / PostgreSQL / SQLite), atomic rubric question generation via OpenAI structured outputs (`get_jev_questions`), and template rendering.
+- **Grading Coordinator (`grader.py`)**: Centralized grading engine aggregating scores across multiple-choice questions and free-text essay questions.
+- **AI Essay Evaluation Subsystem (`essaygrader.py`)**: Essay evaluation engine powered by Jev System 1 via the TypeSafe SDK (`typesafe_sdk.TypeSafeClient` and `Noul`), evaluating student essays against atomic rubric questions using a 0.5 decision threshold.
 - **Email Notification Subsystem (`mailer.py`)**: SMTP client with console logging fallback for notifying instructors of quiz submissions.
 - **Command-Line Test Harness (`test.py`)**: Standalone CLI tool for direct testing and evaluation of the essay grading pipeline.
 
@@ -23,9 +23,10 @@ The system is organized into modular subsystems:
 │                                 app.py                                    │
 │  - Request Lifecycle & Auth Hooks: load_current_user, inject_user         │
 │  - User & Course Management: set_user, delete_user, manage_courses        │
+│  - Rubric Decomposition: get_jev_questions (OpenAI Structured Outputs)    │
 │  - Quiz Authoring & Navigation: teacher_create, list_quizzes, take_quiz   │
 │  - Submission Orchestrator: submit_quiz ─────────────────────────────┐    │
-└─────────────────────────────────┬─��──────────────────────────────────┼────┘
+└─────────────────────────────────┬─────────────────────────────────────┼────┘
                                   │                                    │
                         load_quiz │ save_response                      │
                                   ▼                                    │
@@ -48,18 +49,13 @@ The system is organized into modular subsystems:
                   ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                              essaygrader.py                               │
-│  - grade_essay()                                                          │
-│     ├── Path A: _grade_with_openai() [if OPENAI_API_KEY]                  │
-│     ├── Path B: Ollama Local LLM Workflow                                 │
-│     │    ├── _compute_semantic_score() -> _ollama_embedding()             │
-│     │    │                                -> _cosine_similarity()         │
-│     │    ├── _build_prompt()                                              │
-│     │    ├── _ollama_generate()                                           │
-│     │    └── _parse_llm_json() -> _extract_first_json_object()            │
-│     └── Path C (or Error Fallback): Deterministic Heuristic Evaluation    │
-│          ├── _heuristic_coverage() -> _simple_requirement_match()         │
-│          └── _coverage_to_grade()                                         │
-│     └── Common: _synthesize_deductions() & GradeResult.to_dict()          │
+│  - grade_essay(essay, requirements, max_points=100)                       │
+│     └── jev_grader(essay, requirements, max_points=100)                   │
+│          ├── questions_to_dict(atomic_questions) -> {key: Noul(q)}        │
+│          ├── TypeSafeClient.system_one(state=essay, questions=dict)       │
+│          ├── Threshold evaluation: score >= 0.5 -> "Yes" / "No"           │
+│          ├── Grade calculation & deduction breakdown                      │
+│          └── returns structured result dict                               │
 └─────────────────────────────────┬─────────────────────────────────────────┘
                                   │
                                   │ (returns structured result)
@@ -159,9 +155,9 @@ Every HTTP request passing through Flask triggers:
    - Renders `create_quiz_step2.html` passing `idx_list = list(range(num_questions))`, `start_date`, `end_date`, `title`, and `teacher_email`.
 4. **POST Request - Step 2 (`wizard_step == '2'`):**
    - Parses form data for each index `i` in `range(num_questions)`:
-     - If `q_type_{i} == 'essay'`: extracts `q_text_{i}`, `q_requirements_{i}` (split by `\n\n`), and `q_max_points_{i}`.
+     - If `q_type_{i} == 'essay'`: extracts `q_text_{i}`, `q_requirements_{i}` (split by `\n\n`), and `q_max_points_{i}`. Calls `get_jev_questions(requirements)` to convert raw rubric criteria into atomic Noul evaluation questions via OpenAI structured outputs.
      - If `q_type_{i} == 'mc'`: extracts `q_text_{i}`, `q_options_{i}` (split by delimiters), `q_correct_{i}` (converted to 0-based index `correct_index`), and `q_points_{i}`.
-   - Generates UUID `quiz_id`.
+   - Generates UUID `quiz_id` (first 8 characters).
    - Constructs quiz dictionary and calls `save_quiz(quiz)`.
    - Renders `quiz_created.html`.
 5. **POST Request - Legacy JSON (`questions_json` present, no `wizard_step`):**
@@ -184,7 +180,7 @@ User (Browser)               app.py                      grader.py              
      │                         │                             │── _points_for_essay(q)    │                       │
      │                         │                             │                           │                       │
      │                         │                             │── grade_essay(text, reqs)─>                       │
-     │                         │                             │   (evaluates via LLM/heur)│                       │
+     │                         │                             │   (evaluates via Jev/Noul)│                       │
      │                         │                             │<── returns dict ──────────│                       │
      │                         │<── returns graded dict ─────│                                                   │
      │                         │                                                                                 │
@@ -204,7 +200,7 @@ User (Browser)               app.py                      grader.py              
    - Extracts `student_name`, `student_email`, and compiles `answers` list aligned with quiz question indices.
    - Calls `grade_quiz(quiz, answers)` in `grader.py`.
    - Constructs response record with generated UUID and invokes `save_response(quiz_id, response)`.
-   - Formats grade breakdown email and calls `send_email(teacher_email, subject, body)` in `mailer.py`.
+   - Formats grade breakdown email with detailed feedback from Jev Noul questions and probabilities, then calls `send_email(teacher_email, subject, body)` in `mailer.py`.
    - Renders `submission_success.html` with results.
 
 ---
@@ -221,7 +217,7 @@ User (Browser)               app.py                      grader.py              
 
 When running `python test.py [options]`:
 1. `main(sys.argv[1:])` is invoked.
-2. Calls `parse_args(argv)` to parse command line flags.
+2. Calls `parse_args(argv)` to parse command-line flags (`--essay`, `--essay-file`, `-r`, `--requirements-file`, `--model`, `--base-url`, `--temperature`, `--timeout`).
 3. Calls `collect_inputs(ns)`:
    - If files provided (`--essay-file`, `--requirements-file`), reads them via `_read_text_file(path)`.
    - If raw strings provided (`--essay`, `-r`), parses them.
@@ -338,6 +334,18 @@ When running `python test.py [options]`:
   - `response_dict` (`dict`): Dictionary containing `id`, `student_name`, `student_email`, `submitted_at`, `answers`, and `result`.
 - **Operation**: Creates and persists `Response` entity.
 
+#### `get_jev_questions(rubric: List[str]) -> List[str]`
+- **Caller**: `teacher_create()`.
+- **Arguments**:
+  - `rubric` (`List[str]`): Raw rubric criteria strings submitted in the quiz creation form.
+- **Execution Workflow**:
+  1. If `rubric` is empty, returns empty list.
+  2. Formats numbered criteria list and provides detailed instructions to OpenAI to split rubric items into atomic, independent, unambiguous Yes/No evaluation questions (Noul statements).
+  3. Invokes `llmclient.beta.chat.completions.parse` with `AtomicQuestions` response format schema and model specified by `OPENAI_MODEL` (default: `"gpt-6.1-sol"`).
+  4. On successful parsing, returns the list of atomic question strings.
+  5. On error/fallback, returns non-empty original rubric items.
+- **Returns**: List of atomic evaluation question strings (`List[str]`).
+
 #### `login_required() -> Response`
 - **Caller**: `roles_required()`.
 - **Arguments**: None.
@@ -362,7 +370,7 @@ When running `python test.py [options]`:
 - `delete_quiz(quiz_id)`: Serves `POST /quiz/delete/<quiz_id>`. Calls `delete_quiz_data(quiz_id)`.
 - `manage_users()`: Serves `/manage/users`. Handles adding, deleting, and resetting user credentials.
 - `manage_courses()`: Serves `/manage/courses`. Handles course creation, deletion, teacher assignment, and student roster management.
-- `teacher_create()`: Serves `/teacher/create`. Multi-step wizard creating multiple choice and essay quiz items.
+- `teacher_create()`: Serves `/teacher/create`. Multi-step wizard creating multiple choice and essay quiz items (invoking `get_jev_questions` for essay questions).
 - `take_quiz(quiz_id)`: Serves `/quiz/<quiz_id>`. Validates dates and renders quiz form.
 - `submit_quiz(quiz_id)`: Serves `POST /quiz/<quiz_id>/submit`. Coordinates grading via `grade_quiz()`, response persistence, and email notification via `send_email()`.
 
@@ -400,20 +408,22 @@ When running `python test.py [options]`:
      - Calls `_points_for_essay(q)` to determine `max_pts`.
      - Extracts `requirements` list and student answer `essay_text`.
      - Invokes `grade_essay(essay_text, requirements, max_points=100)` in `essaygrader.py`.
-     - Computes scaled score: `round((eg['grade'] / 100.0) * max_pts)`.
-     - Appends item breakdown to `per_question` list with details and deductions.
+     - Maps returned grade (0..100) to question points: `awarded = round((int(eg.get('grade', 0)) / 100) * max_pts)` bounded in `[0, max_pts]`.
+     - Appends item breakdown to `per_question` list with details containing prompt, requirements, essay text, and essaygrader artifacts.
   4. For **Multiple Choice questions**:
      - Calls `_points_for_mc(q)` to determine `max_pts`.
      - Compares answer index `ai` to `q['correct_index']`.
      - Awards full `max_pts` if correct, else 0.
      - Appends item breakdown to `per_question`.
-  5. Computes overall score, total available points, and percentage.
+  5. Computes overall score percentage, final score normalized to 100, raw awarded score, and raw total points.
 - **Returns**: Structured dictionary:
   ```python
   {
-      'score': int,
-      'total': int,
+      'score': int | float,
+      'total': 100,
       'percent': float,
+      'raw_score': int,
+      'raw_total': int,
       'per_question': [
           {
               'type': 'mc' | 'essay',
@@ -432,160 +442,70 @@ When running `python test.py [options]`:
 ### 3.3 `essaygrader.py`
 
 #### `GradeResult.to_dict(self) -> Dict[str, Any]`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**: None (method on dataclass).
-- **Returns**: Standard dictionary representation of the grade outcome.
+- **Caller**: Helper method on `GradeResult` dataclass.
+- **Arguments**: None.
+- **Returns**: Standard dictionary representation of the grading outcome.
+
+#### `questions_to_dict(questions: list[str]) -> dict[str, Noul]`
+- **Caller**: `jev_grader()`.
+- **Arguments**:
+  - `questions` (`list[str]`): List of atomic question strings.
+- **Returns**: Dictionary mapping key names (`"question0"`, `"question1"`, ...) to `Noul(instructions=question)` objects.
+
+#### `jev_grader(essay: str, requirements: List[str], max_points: int = 100) -> Dict[str, Any]`
+- **Caller**: `grade_essay()`.
+- **Arguments**:
+  - `essay` (`str`): Student's submitted essay text (must be non-empty string).
+  - `requirements` (`List[str]`): List of atomic evaluation requirements.
+  - `max_points` (`int`): Maximum score scale (default: `100`).
+- **Execution Workflow**:
+  1. Validates that `essay` is a non-empty string.
+  2. Normalizes `requirements` into `atomic_questions` (defaults to `["Does the essay address the required topic?"]` if empty).
+  3. Initializes `TypeSafeClient` with `OPEN_ROUTER_KEY` and base URL `https://openrouter.ai/api`.
+  4. Calls `client.system_one(state=essay, questions=questions_to_dict(atomic_questions))` to evaluate the essay against each Noul question in Jev System 1.
+  5. Iterates through question evaluation answers:
+     - Extracts continuous score / probability float from `noul_instance.noul`.
+     - Evaluates binary condition: `is_yes = score >= 0.5`.
+     - Builds `feedback`, `reasons`, and `coverage` lists.
+  6. Calculates overall grade: `grade_100 = round((yes_count / num_q) * 100)`.
+  7. Computes itemized deductions: for each criterion with answer `"No"`, assigns penalty points `round(100 / num_q)` and determines `total_deductions = max(0, 100 - grade_100)`.
+  8. Returns structured dictionary.
+- **Returns**: Dictionary containing:
+  ```python
+  {
+      "grade": int,
+      "max_points": 100,
+      "essay": str,
+      "feedback": [
+          {
+              "question": str,
+              "answer": "Yes" | "No",
+              "score": float,
+              "probability": float
+          },
+          ...
+      ],
+      "reasons": list[str],
+      "coverage": list[dict],
+      "backend": "jev",
+      "questions": list[str],
+      "answers": dict,
+      "deductions": list[dict],
+      "total_deductions": int
+  }
+  ```
 
 #### `grade_essay(essay: str, requirements: List[str], *, model: Optional[str] = None, base_url: Optional[str] = None, temperature: float = 0.2, timeout: float = 30.0, max_points: int = 100) -> Dict[str, Any]`
 - **Caller**: `grade_quiz()` in `grader.py`, `main()` in `test.py`.
 - **Arguments**:
   - `essay` (`str`): Student's submitted essay text.
-  - `requirements` (`List[str]`): List of rubric requirements.
-  - `model` (`Optional[str]`): Model identifier (defaults to `ESSAYGRADER_MODEL` or `"gemma3:12b"`).
-  - `base_url` (`Optional[str]`): Ollama API base URL (defaults to `ESSAYGRADER_OLLAMA_BASE_URL` or `"http://localhost:11434"`).
-  - `temperature` (`float`): Sampling temperature (default: `0.2`).
-  - `timeout` (`float`): Network timeout in seconds (default: `30.0`).
+  - `requirements` (`List[str]`): Rubric requirements / atomic questions.
+  - `model` (`Optional[str]`): Optional model parameter (reserved for interface compatibility).
+  - `base_url` (`Optional[str]`): Optional base URL parameter (reserved for interface compatibility).
+  - `temperature` (`float`): Optional sampling temperature (default: `0.2`).
+  - `timeout` (`float`): Optional timeout in seconds (default: `30.0`).
   - `max_points` (`int`): Maximum points scale (default: `100`).
-- **Execution Workflow**:
-  1. Validates inputs (`essay` non-empty string, `requirements` list of strings).
-  2. If `OPENAI_API_KEY` environment variable is present:
-     - Delegates directly to `_grade_with_openai()`.
-  3. Local Ollama LLM Path:
-     - Calls `_compute_semantic_score(...)` to obtain cosine similarity between essay and requirements.
-     - Calls `_build_prompt(essay, requirements, similarity_score, max_points)`.
-     - Calls `_ollama_generate(...)` to submit prompt to Ollama `/api/generate`.
-     - Calls `_parse_llm_json(response_text)`.
-     - If response is valid JSON: parses grade, coverage, reasons, and normalizes deductions. If deductions are missing or misaligned, invokes `_synthesize_deductions()`.
-     - If response is non-JSON: calls `_heuristic_coverage()`, `_coverage_to_grade()`, and `_synthesize_deductions()`.
-  4. Exception / Fallback Path (e.g. Ollama unreachable or connection error):
-     - Catches exception and executes deterministic fallback.
-     - Calls `_heuristic_coverage(essay, requirements)`.
-     - Calls `_coverage_to_grade(coverage, max_points)`.
-     - Calls `_synthesize_deductions(grade=..., max_points=..., coverage=...)`.
-     - If 404 error, calls `_get_available_ollama_models(base_url)` to provide helpful diagnostics.
-  5. Returns `GradeResult.to_dict()`.
-
-#### `_build_prompt(essay: str, requirements: List[str], similarity_score: Optional[float], max_points: int) -> str`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**:
-  - `essay` (`str`): Essay body.
-  - `requirements` (`List[str]`): List of requirement strings.
-  - `similarity_score` (`Optional[float]`): Precomputed cosine similarity score or `None`.
-  - `max_points` (`int`): Maximum points.
-- **Returns**: Formatted prompt instructing the model to act as an academic evaluator and output strict JSON.
-
-#### `_synthesize_deductions(*, grade: int, max_points: int, coverage: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**:
-  - `grade` (`int`): Awarded grade.
-  - `max_points` (`int`): Total points possible.
-  - `coverage` (`List[Dict[str, Any]]`): List of requirement coverage evaluation dicts.
-- **Returns**: Tuple `(deductions_list, total_deductions)` explaining points lost.
-
-#### `_compute_semantic_score(base_url: str, model: str, essay: str, requirements: List[str], timeout: float) -> Optional[float]`
-- **Caller**: `grade_essay()`.
-- **Arguments**:
-  - `base_url` (`str`): Base URL for Ollama.
-  - `model` (`str`): Embedding model name.
-  - `essay` (`str`): Essay text.
-  - `requirements` (`List[str]`): Rubric requirements.
-  - `timeout` (`float`): Request timeout in seconds.
-- **Execution**:
-  1. Combines requirements into a single ideal text string.
-  2. Calls `_ollama_embedding(base_url, model, essay, timeout)`.
-  3. Calls `_ollama_embedding(base_url, model, ideal_text, timeout)`.
-  4. Calls `_cosine_similarity(vec_essay, vec_ideal)`.
-- **Returns**: Float similarity score in `[0.0, 1.0]` or `None` on failure.
-
-#### `_get_ssl_context() -> Optional[ssl.SSLContext]`
-- **Caller**: `_ollama_embedding()`, `_ollama_generate()`, `_grade_with_openai()`, `_get_available_ollama_models()`.
-- **Arguments**: None.
-- **Returns**: An `ssl.SSLContext` configured with unverified certificate validation for local loopback connections.
-
-#### `_ollama_embedding(base_url: str, model: str, text: str, timeout: float) -> List[float]`
-- **Caller**: `_compute_semantic_score()`.
-- **Arguments**:
-  - `base_url` (`str`): Ollama URL.
-  - `model` (`str`): Model identifier.
-  - `text` (`str`): Text string to embed (truncated to 8000 chars).
-  - `timeout` (`float`): Timeout in seconds.
-- **Execution**:
-  1. Attempts POST to `{base_url}/api/embed` (Ollama batch API).
-  2. If unavailable, falls back to POST `{base_url}/api/embeddings` (legacy API).
-- **Returns**: List of float embedding dimensions.
-
-#### `_cosine_similarity(v1: List[float], v2: List[float]) -> float`
-- **Caller**: `_compute_semantic_score()`.
-- **Arguments**:
-  - `v1` (`List[float]`): First vector.
-  - `v2` (`List[float]`): Second vector.
-- **Returns**: Dot product divided by magnitudes product (float).
-
-#### `_ollama_generate(*, base_url: str, model: str, prompt: str, temperature: float, timeout: float) -> str`
-- **Caller**: `grade_essay()`.
-- **Arguments**:
-  - `base_url` (`str`): Ollama server address.
-  - `model` (`str`): Model name.
-  - `prompt` (`str`): Evaluation prompt.
-  - `temperature` (`float`): Model sampling temperature.
-  - `timeout` (`float`): HTTP timeout.
-- **Returns**: Response text generated by the model.
-
-#### `_parse_llm_json(text: str) -> Optional[Dict[str, Any]]`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**:
-  - `text` (`str`): Raw LLM response string.
-- **Execution**:
-  1. Attempts direct `json.loads(text)`.
-  2. On failure, calls `_extract_first_json_object(text)` and attempts parsing the extracted substring.
-- **Returns**: Parsed dictionary or `None`.
-
-#### `_extract_first_json_object(text: str) -> Optional[str]`
-- **Caller**: `_parse_llm_json()`.
-- **Arguments**:
-  - `text` (`str`): String containing possible JSON substring.
-- **Returns**: Substring matching the first balanced `{ ... }` block, or `None`.
-
-#### `_heuristic_coverage(essay: str, requirements: List[str]) -> List[Dict[str, Any]]`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**:
-  - `essay` (`str`): Essay text.
-  - `requirements` (`List[str]`): List of requirement strings.
-- **Execution**:
-  - Iterates over requirements and invokes `_simple_requirement_match(essay.lower(), req)`.
-- **Returns**: List of coverage dicts: `[{'requirement': str, 'addressed': bool, 'evidence': str}]`.
-
-#### `_simple_requirement_match(essay_lc: str, requirement: str) -> Tuple[bool, str]`
-- **Caller**: `_heuristic_coverage()`.
-- **Arguments**:
-  - `essay_lc` (`str`): Lowercased essay text.
-  - `requirement` (`str`): Single requirement string.
-- **Returns**: Tuple `(addressed: bool, evidence: str)`.
-
-#### `_coverage_to_grade(coverage: List[Dict[str, Any]], max_points: int) -> int`
-- **Caller**: `grade_essay()`, `_grade_with_openai()`.
-- **Arguments**:
-  - `coverage` (`List[Dict[str, Any]]`): Coverage result list.
-  - `max_points` (`int`): Maximum points.
-- **Returns**: Integer grade proportional to addressed requirements ratio.
-
-#### `_grade_with_openai(essay: str, requirements: List[str], api_key: str, model: str, temperature: float, timeout: float, max_points: int) -> Dict[str, Any]`
-- **Caller**: `grade_essay()`.
-- **Arguments**:
-  - `essay` (`str`): Student essay.
-  - `requirements` (`List[str]`): List of requirements.
-  - `api_key` (`str`): OpenAI API secret key.
-  - `model` (`str`): OpenAI model identifier (e.g. `'gpt-4o-mini'`).
-  - `temperature` (`float`): Temperature parameter.
-  - `timeout` (`float`): HTTP timeout in seconds.
-  - `max_points` (`int`): Maximum points.
-- **Returns**: Dictionary generated from `GradeResult.to_dict()`.
-
-#### `_get_available_ollama_models(base_url: str) -> List[str]`
-- **Caller**: `grade_essay()`.
-- **Arguments**:
-  - `base_url` (`str`): Ollama server URL.
-- **Returns**: List of available model name strings queried from `/api/tags`.
+- **Operation**: Directly invokes `jev_grader(essay, requirements, max_points=max_points)` and returns the grading outcome dictionary.
 
 ---
 
@@ -668,6 +588,7 @@ When running `python test.py [options]`:
 | **User Mgmt** | `manage_users` | `set_user` | `username, role, password` | DB upsert |
 | **User Mgmt** | `manage_users` | `delete_user` | `username` | DB delete |
 | **Course Mgmt** | `manage_courses` | `_load_courses` | - | Course mapping dict |
+| **Quiz Creation**| `teacher_create` | `get_jev_questions` | `requirements` | Atomic Noul questions list |
 | **Quiz Creation**| `teacher_create` | `save_quiz` | `quiz_dict` | DB upsert |
 | **Quiz View** | `take_quiz` | `load_quiz` | `quiz_id` | Quiz dictionary |
 | **Quiz Submit** | `submit_quiz` | `load_quiz` | `quiz_id` | Quiz dictionary |
@@ -679,17 +600,9 @@ When running `python test.py [options]`:
 | **Grading Core** | `grade_quiz` | `_points_for_mc` | `q` | Max MC points |
 | **Grading Core** | `grade_quiz` | `_points_for_essay` | `q` | Max essay points |
 | **Grading Core** | `grade_quiz` | `grade_essay` | `essay_text, requirements, max_points=100` | Essay grade result dict |
-| **Essay Grading**| `grade_essay` | `_compute_semantic_score` | `base_url, model, essay, requirements, timeout` | Cosine similarity float |
-| **Essay Grading**| `grade_essay` | `_build_prompt` | `essay, requirements, similarity_score, max_points` | Formatted prompt string |
-| **Essay Grading**| `grade_essay` | `_ollama_generate` | `base_url, model, prompt, temperature, timeout` | LLM response string |
-| **Essay Grading**| `grade_essay` | `_parse_llm_json` | `response_text` | Parsed JSON dict |
-| **Essay Grading**| `_parse_llm_json` | `_extract_first_json_object` | `text` | JSON substring |
-| **Essay Grading**| `grade_essay` | `_synthesize_deductions`| `grade, max_points, coverage` | Deductions list & total |
-| **Essay Fallback**| `grade_essay` | `_heuristic_coverage` | `essay, requirements` | Coverage list |
-| **Essay Fallback**| `_heuristic_coverage` | `_simple_requirement_match` | `essay_lc, requirement` | `(addressed, evidence)` |
-| **Essay Fallback**| `grade_essay` | `_coverage_to_grade` | `coverage, max_points` | Integer grade score |
-| **Essay Fallback**| `grade_essay` | `_get_available_ollama_models`| `base_url` | Available model names |
-| **OpenAI Path** | `grade_essay` | `_grade_with_openai` | `essay, requirements, api_key, model, ...` | OpenAI grade result dict |
+| **Essay Grading**| `grade_essay` | `jev_grader` | `essay, requirements, max_points=100` | Essay grade result dict |
+| **Jev Evaluation**| `jev_grader` | `questions_to_dict` | `atomic_questions` | `{key: Noul(q)}` dict |
+| **Jev Evaluation**| `jev_grader` | `client.system_one` | `state=essay, questions=dict` | System 1 answer probabilities |
 | **CLI Harness** | `main` | `parse_args` | `argv` | Parsed CLI namespace |
 | **CLI Harness** | `main` | `collect_inputs` | `ns` | `(essay, requirements)` |
 | **CLI Harness** | `collect_inputs` | `_read_text_file` | `path` | Text content string |
