@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or 'QuizMaker' }}</title>
+  <meta name="theme-color" content="#d4a373">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    :root {
+      /* Modern Professional Palette */
+      --primary: #0690dd;
+      --primary-hover: #035d8d;
+      --primary-focus: rgba(4, 114, 172, 0.125);
+      --primary-inverse: #fff;
+      
+      --pico-primary: var(--primary);
+      --pico-primary-hover: var(--primary-hover);
+      --pico-primary-focus: var(--primary-focus);
+      --pico-primary-inverse: var(--primary-inverse);
+
+      --pico-border-radius: 0.75rem;
+      --pico-font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    body {
+      background-color: #e2e8f0;
+      transition: background-color 0.3s ease;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+
+    header {
+      background: white;
+      padding: 1rem 1.5rem;
+      border-radius: var(--pico-border-radius);
+      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+      margin-bottom: 2rem;
+      border: none;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      margin-bottom: 0;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--primary) 0%, #9333ea 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    nav ul {
+      margin-top: 0.5rem;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 0.5rem;
+    }
+
+    article {
+      border: none;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      background: white;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    article h2, article h3, article h4 {
+      color: #374151; /* Darker shade of gray */
+    }
+
+    button, [role="button"], input[type="submit"] {
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+
+    button:hover, [role="button"]:hover, input[type="submit"]:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+
+    .flash {
+      border: none;
+      font-weight: 500;
+      box-shadow: 0 2px 4px 0 rgb(0 0 0 / 0.05);
+    }
+
+    .flash.error {
+      background-color: #fef2f2;
+      color: #991b1b;
+    }
+
+    .flash.success {
+      background-color: #f0fdf4;
+      color: #166534;
+    }
+
+    code {
+      background: #f1f5f9;
+      color: #0b0d12;
+      padding: 0.2rem 0.4rem;
+      border-radius: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>{{ title or 'Quizem' }}</h1>
+      <nav>
+        <ul>
+          <li><a href="{{ url_for('index') }}">Home</a></li>
+          {% if current_user %}
+            {% if current_user.role == 'admin' %}
+              <li><a href="{{ url_for('manage_users') }}">Manage Users</a></li>
+              <li><a href="{{ url_for('manage_courses') }}">Manage Courses</a></li>
+            {% elif current_user.role == 'teacher' %}
+              <li><a href="{{ url_for('teacher_create') }}">Create Quiz</a></li>
+              <li><a href="{{ url_for('manage_users') }}">Manage Students</a></li>
+            {% endif %}
+          {% endif %}
+          <li style="margin-left:auto"></li>
+          {% if current_user %}
+            <li><small>Signed in as {{ current_user.username }} ({{ current_user.role }})</small></li>
+            <li><a href="{{ url_for('logout') }}">Logout</a></li>
+          {% else %}
+            <li><a href="{{ url_for('login') }}">Login</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

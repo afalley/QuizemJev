@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block content %}
+  <article>
+    <hgroup>
+      <h2>User Management</h2>
+      <p>Add, remove, or update student accounts.</p>
+    </hgroup>
+
+    <section>
+      <h3>Add New User</h3>
+      <form method="post" class="grid">
+        <input type="hidden" name="action" value="add">
+        <label>
+          Username
+          <input type="text" name="username" placeholder="e.g., alice" required>
+        </label>
+        {% if is_admin %}
+        <label>
+          Role
+          <select name="role">
+            <option value="student">Student</option>
+            <option value="teacher">Teacher</option>
+          </select>
+        </label>
+        {% endif %}
+        <label>
+          Password
+          <input type="text" name="password" placeholder="default: same as role">
+        </label>
+        <div style="display: flex; align-items: flex-end; padding-bottom: 1rem;">
+            <button type="submit" style="width: 100%;">Add User</button>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <h3>Existing Users</h3>
+      {% if is_admin %}
+        <div class="overflow-auto">
+          <table class="striped">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u, data in users %}
+                <tr>
+                  <td style="vertical-align: middle;"><strong>{{ u }}</strong></td>
+                  <td style="vertical-align: middle;">{{ data.role }}</td>
+                  <td style="text-align: right;">
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center;">
+                        <form method="post" style="margin: 0; display: flex; gap: 0.25rem;">
+                          <input type="hidden" name="action" value="reset">
+                          <input type="hidden" name="username" value="{{ u }}">
+                          <input type="text" name="password" placeholder="New pass" required style="margin: 0; padding: 0.25rem 0.5rem; height: auto;">
+                          <button type="submit" style="padding: 0.25rem 0.75rem; height: auto;">Reset</button>
+                        </form>
+                        
+                        {% if u not in ('admin', 'teacher', 'student') %}
+                        <form method="post" style="margin: 0;" onsubmit="return confirm('Delete user {{ u }}?');">
+                          <input type="hidden" name="action" value="delete">
+                          <input type="hidden" name="username" value="{{ u }}">
+                          <button type="submit" class="outline contrast" style="padding: 0.25rem 0.75rem; height: auto;">Delete</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% elif students %}
+        <div class="overflow-auto">
+          <table class="striped">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in students %}
+                <tr>
+                  <td style="vertical-align: middle;"><strong>{{ s }}</strong></td>
+                  <td style="text-align: right;">
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center;">
+                        <form method="post" style="margin: 0; display: flex; gap: 0.25rem;">
+                          <input type="hidden" name="action" value="reset">
+                          <input type="hidden" name="username" value="{{ s }}">
+                          <input type="text" name="password" placeholder="New pass" required style="margin: 0; padding: 0.25rem 0.5rem; height: auto;">
+                          <button type="submit" style="padding: 0.25rem 0.75rem; height: auto;">Reset</button>
+                        </form>
+                        
+                        <form method="post" style="margin: 0;" onsubmit="return confirm('Delete user {{ s }}?');">
+                          <input type="hidden" name="action" value="delete">
+                          <input type="hidden" name="username" value="{{ s }}">
+                          <button type="submit" class="outline contrast" style="padding: 0.25rem 0.75rem; height: auto;">Delete</button>
+                        </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p>No students enrolled yet.</p>
+      {% endif %}
+    </section>
+
+  </article>
+{% endblock %}

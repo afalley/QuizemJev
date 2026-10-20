@@ -1,0 +1,19 @@
+# Virtual Environment & Dependencies
+.venv/
+venv/
+
+.env
+
+# Python Cache
+__pycache__/
+*.py[cod]
+
+# Local Database & Instance State
+instance/
+*.sqlite3
+*.db
+
+# Tooling & System Artifacts
+.idea/
+.DS_Store
+instance/quizem.db

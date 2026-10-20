@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% block content %}
+  <style>
+    .text-primary { color: var(--primary) !important; }
+    .text-success { color: #166534 !important; }
+    .text-error { color: #991b1b !important; }
+    .muted { color: #64748b !important; }
+    
+    .essay-box {
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin: 1rem 0;
+        white-space: pre-wrap;
+        color: #1e293b !important;
+    }
+    
+    .feedback-container {
+        border-left: 4px solid var(--primary);
+        padding-left: 1rem;
+        margin: 1.5rem 0;
+    }
+
+    .breakdown-item {
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    .breakdown-item:last-child {
+        border-bottom: none;
+    }
+
+    .score-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        background: var(--primary);
+        color: white;
+        border-radius: 9999px;
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+  </style>
+  <article>
+    <hgroup>
+      <h2>Thank you{% if student_name %}, {{ student_name }}{% endif %}!</h2>
+      <p>Your submission has been received and graded.</p>
+    </hgroup>
+    
+    <div style="background: var(--primary-focus); padding: 1.5rem; border-radius: 0.75rem; text-align: center; margin-bottom: 2rem;">
+        <h3 style="margin-bottom: 0;">Overall Score</h3>
+        <div style="font-size: 3rem; font-weight: 800; color: var(--primary);">
+            {{ result.score }}<span style="font-size: 1.5rem; color: #64748b; font-weight: 400;">/{{ result.total }}</span>
+        </div>
+        <div class="score-badge">{{ result.percent }}%</div>
+    </div>
+
+    {% if result.per_question %}
+      <h3>Question Breakdown</h3>
+      <div>
+        {% for pq in result.per_question %}
+          <div class="breakdown-item">
+            {% set q_text = pq.details.text or pq.details.prompt %}
+            <p style="font-size: 1.125rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">
+                {{ loop.index }}. {{ q_text }}
+            </p>
+
+            <div style="margin-bottom: 1rem;">
+                {% if pq.awarded == pq.max_points %}
+                  {% set badge_bg = '#166534' %}
+                {% elif pq.awarded == 0 %}
+                  {% set badge_bg = '#991b1b' %}
+                {% else %}
+                  {% set badge_bg = 'var(--primary)' %}
+                {% endif %}
+                <span class="score-badge" style="background-color: {{ badge_bg }};">
+                    {{ pq.awarded }}/{{ pq.max_points }} Points
+                </span>
+                <small class="muted" style="margin-left: 0.5rem; text-transform: uppercase; font-weight: 700;">{{ pq.type }}</small>
+            </div>
+            
+            {% if pq.type == 'essay' %}
+              {% set eg = pq.details.essaygrader %}
+              {% set essay_text = pq.details.essay or (eg.essay if eg else "") or (result.answers[loop.index0] if result.answers else "") %}
+              <div class="essay-box">
+                {{ essay_text }}
+              </div>
+
+              {% if eg %}
+                <div class="feedback-container">
+                  <h5 style="margin-bottom: 0.75rem;">Feedback</h5>
+                  {% if eg.feedback %}
+                    <ul style="list-style-type: none; padding-left: 0; margin-bottom: 0;">
+                      {% for item in eg.feedback %}
+                        <li style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 0.375rem; display: flex; justify-content: space-between; align-items: center;">
+                          <span style="font-weight: 500; color: #1e293b;">
+                            {{ item.question }}
+                            {% if item.probability is defined or item.score is defined %}
+                              {% set prob = item.probability if item.probability is defined else item.score %}
+                              <small class="muted" style="margin-left: 0.5rem;">(Probability: {{ "%.2f"|format(prob) }})</small>
+                            {% endif %}
+                          </span>
+                          {% if item.answer == 'Yes' %}
+                            <span class="score-badge" style="background-color: #166534; font-weight: 700; margin-left: 1rem;">Yes</span>
+                          {% else %}
+                            <span class="score-badge" style="background-color: #991b1b; font-weight: 700; margin-left: 1rem;">No</span>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% elif eg.reasons %}
+                    <ul>
+                      {% for r in eg.reasons %}
+                        <li>{{ r }}</li>
+                      {% endfor %}
+                    </ul>
+                  {% endif %}
+                </div>
+              {% endif %}
+            {% endif %}
+
+            {% if pq.type == 'mc' %}
+              <ul style="list-style-type: none; padding-left: 0;">
+                {% for opt in pq.details.options %}
+                  {% set is_selected = (pq.details.selected_index == loop.index0) %}
+                  {% set is_correct = pq.correct if is_selected else false %}
+                  {# Note: if not selected, we don't necessarily know if it was correct from this data alone without more logic, 
+                     but pq.correct is only true if selected_index was correct. #}
+                  {% if is_selected and pq.correct %}
+                    {% set item_border = '#bbf7d0' %}
+                    {% set item_bg = '#f0fdf4' %}
+                  {% elif is_selected and not pq.correct %}
+                    {% set item_border = '#fecaca' %}
+                    {% set item_bg = '#fef2f2' %}
+                  {% else %}
+                    {% set item_border = '#f1f5f9' %}
+                    {% set item_bg = 'transparent' %}
+                  {% endif %}
+                  <li style="padding: 0.5rem; border-radius: 0.4rem; margin-bottom: 0.25rem; border: 1px solid {{ item_border }}; background: {{ item_bg }};">
+                    <span style="display: flex; align-items: center;">
+                        <input type="radio" disabled {% if is_selected %}checked{% endif %} style="margin-bottom: 0; margin-right: 0.75rem;">
+                        <span style="flex: 1; {% if is_selected %}font-weight: 600;{% endif %}">
+                            {{ opt }}
+                            {% if is_selected %}
+                              {% if pq.correct %}<span class="text-success">(Correct)</span>{% else %}<span class="text-error">(Incorrect)</span>{% endif %}
+                            {% endif %}
+                        </span>
+                    </span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    
+    <div style="margin-top: 3rem; text-align: center;">
+        <a role="button" href="{{ url_for('index') }}">Back to Quiz List</a>
+    </div>
+  </article>
+{% endblock %}

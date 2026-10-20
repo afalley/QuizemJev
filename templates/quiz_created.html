@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block content %}
+  <article style="max-width: 640px; margin: 2rem auto; text-align: center;">
+    <div style="font-size: 4rem; margin-bottom: 1rem;">🎉</div>
+    <hgroup>
+      <h2>Quiz Created Successfully!</h2>
+      <p>Your new quiz <strong>{{ quiz.title }}</strong> is now live.</p>
+    </hgroup>
+    
+    <div style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 1.5rem; border-radius: 1rem; margin: 2rem 0; text-align: left;">
+        <label>
+            Quiz URL for Students
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                <input readonly value="{{ url_for('take_quiz', quiz_id=quiz.id, _external=True) }}" style="margin-bottom: 0; font-family: monospace; font-size: 0.875rem;">
+            </div>
+        </label>
+        <p style="margin-top: 1rem; font-size: 0.875rem;">
+            <a href="{{ url_for('take_quiz', quiz_id=quiz.id, _external=True) }}" target="_blank">Open Quiz in New Tab &rarr;</a>
+        </p>
+    </div>
+
+    <div class="grid">
+        <a role="button" href="{{ url_for('index') }}">Back to Dashboard</a>
+        <a role="button" class="outline" href="{{ url_for('teacher_create') }}">Create Another</a>
+    </div>
+  </article>
+{% endblock %}

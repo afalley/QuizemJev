@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block content %}
+  <article>
+    <header style="border: none; background: none; padding: 0; margin-bottom: 1.5rem;">
+      <h2 style="margin: 0;">Available Quizzes</h2>
+    </header>
+    {% if quizzes %}
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        {% for q in quizzes %}
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border: 1px solid var(--primary); border-radius: var(--pico-border-radius); background: #1a1a1a; color: white; transition: all 0.2s ease;" class="quiz-item">
+            <h4 style="margin: 0; font-size: 1.125rem; color: inherit;">
+              <a href="{{ url_for('take_quiz', quiz_id=q.id) }}" style="text-decoration: none; color: var(--primary);">{{ q.title }}</a>
+            </h4>
+            <div style="display: flex; align-items: center; gap: 1.5rem;">
+              <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                {% if q.created_at %}
+                  <small style="color: #cbd5e1; white-space: nowrap;">Created: {{ q.created_at[:10] }}</small>
+                {% endif %}
+                {% if q.available_from or q.available_until %}
+                  <small style="color: #94a3b8; font-size: 0.75rem;">
+                    {% if q.available_from %}From: {{ q.available_from }}{% endif %}
+                    {% if q.available_until %} Until: {{ q.available_until }}{% endif %}
+                  </small>
+                {% endif %}
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <a href="{{ url_for('take_quiz', quiz_id=q.id) }}" role="button" class="outline contrast" style="margin: 0; padding: 0.25rem 1rem; font-size: 0.875rem; border-color: var(--primary); color: var(--primary);">Take Quiz</a>
+                {% if current_user and current_user.role == 'teacher' %}
+                  <form action="{{ url_for('delete_quiz', quiz_id=q.id) }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this quiz?');">
+                    <button type="submit" class="outline error" style="margin: 0; padding: 0.25rem 1rem; font-size: 0.875rem; border-color: #e53e3e; color: #e53e3e; --pico-color: #e53e3e; --pico-border-color: #e53e3e; --pico-hover-background: #e53e3e; --pico-hover-color: #fff;">Delete</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p style="text-align: center; color: #64748b; margin: 2rem 0;">No quizzes available right now. Check back later!</p>
+    {% endif %}
+  </article>
+
+  <style>
+    .quiz-item:hover {
+        background-color: #000000 !important;
+        border-color: var(--primary) !important;
+        box-shadow: 0 8px 15px -3px rgb(0 0 0 / 0.3);
+        transform: translateX(4px);
+    }
+  </style>
+
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block content %}
+  <article>
+    <hgroup>
+      <h2>Question Details</h2>
+      <p>Configure each question for your quiz "{{ title }}".</p>
+    </hgroup>
+    
+    <form method="post">
+      <input type="hidden" name="wizard_step" value="2">
+      <input type="hidden" name="title" value="{{ title }}">
+      <input type="hidden" name="teacher_email" value="{{ teacher_email }}">
+      <input type="hidden" name="num_questions" value="{{ num_questions }}">
+      <input type="hidden" name="start_date" value="{{ start_date }}">
+      <input type="hidden" name="end_date" value="{{ end_date }}">
+
+      {% for i in idx_list %}
+        <fieldset style="margin-bottom: 3rem; border: 1px solid #e2e8f0; padding: 2rem; border-radius: 1rem; background: #fff;">
+          <legend style="font-weight: 800; color: var(--primary); font-size: 1.25rem; padding: 0 1rem;">Question {{ i + 1 }}</legend>
+          
+          <div class="grid">
+              <label>
+                Question Type
+                <select name="q_type_{{ i }}">
+                  <option value="mc">Multiple Choice</option>
+                  <option value="essay">Essay (LLM Graded)</option>
+                </select>
+              </label>
+              <div class="mc-fields">
+                  <label>
+                    Points
+                    <input type="number" name="q_points_{{ i }}" min="1" value="1" placeholder="1">
+                  </label>
+              </div>
+              <div class="essay-fields" style="display:none;">
+                  <label>
+                    Max Points
+                    <input type="number" name="q_max_points_{{ i }}" min="1" value="10" placeholder="10">
+                  </label>
+              </div>
+          </div>
+
+          <label>
+            Question Text
+            <textarea name="q_text_{{ i }}" rows="2" required placeholder="What is the capital of France?"></textarea>
+          </label>
+
+          <div class="mc-fields">
+            <label>
+              Options (one per line)
+              <textarea name="q_options_{{ i }}" rows="4" placeholder="Paris&#10;London&#10;Berlin&#10;Madrid"></textarea>
+            </label>
+            <label>
+              Correct Option Number (1, 2, 3...)
+              <input type="number" name="q_correct_{{ i }}" min="1" placeholder="e.g., 1">
+            </label>
+          </div>
+
+          <div class="essay-fields" style="display:none; background: #f1f5f9; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid var(--primary);">
+            <label>
+              Grading Rubric / Requirements (separate requirements with TWO newlines)
+              <textarea name="q_requirements_{{ i }}" rows="5" placeholder="Must mention the industrial revolution.&#10;&#10;Must explain the impact on society."></textarea>
+            </label>
+            <small class="muted">The AI will use this rubric to grade the student's response.</small>
+          </div>
+        </fieldset>
+      {% endfor %}
+
+      <footer style="display: flex; gap: 1rem; background: none; border: none; padding: 0; margin-top: 2rem;">
+        <button type="submit" style="flex: 1;">Create Quiz Now</button>
+        <a role="button" class="outline" href="{{ url_for('teacher_create') }}" style="flex: 0 0 auto;">Back to Step 1</a>
+      </footer>
+    </form>
+  </article>
+  <script>
+    (function() {
+      function updateFieldset(fs) {
+        var typeSel = fs.querySelector('select[name^="q_type_"]');
+        if (!typeSel) return;
+        var mcs = fs.querySelectorAll('.mc-fields');
+        var essays = fs.querySelectorAll('.essay-fields');
+        if (mcs.length === 0 || essays.length === 0) return;
+
+        var setDisplay = function() {
+          var isEssay = typeSel.value === 'essay';
+          mcs.forEach(function(el) { el.style.display = isEssay ? 'none' : ''; });
+          essays.forEach(function(el) { el.style.display = isEssay ? '' : 'none'; });
+        };
+
+        typeSel.addEventListener('change', setDisplay);
+        setDisplay();
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('fieldset').forEach(updateFieldset);
+      });
+    })();
+  </script>
+{% endblock %}

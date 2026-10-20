@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+  <article style="max-width: 640px; margin: 2rem auto;">
+    <hgroup>
+      <h2>Create New Quiz</h2>
+      <p>Step 1: Define basic quiz settings.</p>
+    </hgroup>
+    
+    <form method="post">
+      <input type="hidden" name="wizard_step" value="1">
+      <label>
+        Quiz Title
+        <input name="title" placeholder="e.g., Introduction to Python" required autofocus>
+      </label>
+      
+      <div class="grid">
+        <label>
+          Your Notification Email
+          <input type="email" name="teacher_email" value="{{ default_teacher_email }}" placeholder="teacher@example.com">
+        </label>
+        <label>
+          Number of Questions
+          <input type="number" name="num_questions" min="1" max="50" value="3" required>
+        </label>
+      </div>
+
+      <div class="grid">
+        <label>
+          Available From
+          <input type="date" name="start_date">
+        </label>
+        <label>
+          Available Until
+          <input type="date" name="end_date">
+        </label>
+      </div>
+      
+      <p style="font-size: 0.875rem; color: #64748b; margin-top: 1rem;">
+        <strong>Note:</strong> In the next step, you will be able to configure each question as Multiple Choice or Essay (auto-graded by LLM).
+      </p>
+
+      <footer style="display: flex; gap: 1rem; background: none; border: none; padding: 0; margin-top: 2rem;">
+        <button type="submit" style="flex: 1;">Continue to Step 2</button>
+        <a role="button" class="outline" href="{{ url_for('index') }}" style="flex: 0 0 auto;">Cancel</a>
+      </footer>
+    </form>
+  </article>
+{% endblock %}
